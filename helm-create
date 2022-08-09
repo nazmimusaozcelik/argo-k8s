@@ -1,0 +1,77 @@
+pipeline {
+    agent {label 'quarkus'}
+    stages {
+        stage('Checkout') {
+            steps {
+                git branch: 'master', url: 'https://gitlab.com/halis.simsek/argocd.git'
+            }
+        }
+
+        
+        stage('GET_VARIABLES') {
+            steps {
+                
+                 script {
+                  
+                   env.CHART_NAME = sh(script:'grep "chart.name=" /home/cicd/workspace/kerimaksak-argocd-helm-latest/src/main/resources/application.properties | awk -F"=" "{ print $2 }"', returnStdout: true).replace("chart.name=","").trim()
+                   env.CHART_VERSION = sh(script:'grep "chart.version=" /home/cicd/workspace/kerimaksak-argocd-helm-latest/src/main/resources/application.properties | awk -F"=" "{ print $2 }"', returnStdout: true).replace("chart.version=","").trim()
+                   env.IMAGE_NAME = sh(script:'grep "image.name=" /home/cicd/workspace/kerimaksak-argocd-helm-latest/src/main/resources/application.properties | awk -F"=" "{ print $2 }"', returnStdout: true).replace("image.name=","").trim()
+                   env.IMAGE_VERSION = sh(script:'grep "image.version=" /home/cicd/workspace/kerimaksak-argocd-helm-latest/src/main/resources/application.properties | awk -F"=" "{ print $2 }"', returnStdout: true).replace("image.version=","").trim()
+                   env.IMAGE = "${env.IMAGE_NAME}:${env.IMAGE_VERSION}"
+  
+                 }
+            }            
+        }
+        
+        stage("Name and Version Control"){
+            steps{
+                
+                echo "CHART_NAME ---> ${env.CHART_NAME}"
+                echo "CHART_VERSION ----> ${env.CHART_VERSION}"
+                echo "IMAGE_NAME ---> ${env.IMAGE_NAME}"
+                echo "IMAGE_VERSION ----> ${env.IMAGE_VERSION}"
+                echo "IMAGE ----> ${env.IMAGE}"
+                
+            }
+        }
+
+        stage("Editing Yaml File"){
+            steps{
+                dir('/home/cicd/workspace/kerimaksak-argocd-helm-latest/k8s'){
+                sh "sed -i 's+harbor/hello:1.0+${env.IMAGE}+g' hello-deployment.yml"
+                sh 'cat hello-deployment.yml'
+            
+                }
+            }
+        }
+
+        stage("Create Chart"){
+            steps{
+                dir('/home/cicd/safirdepo-helmcharts'){
+
+                sh "helm create ${env.CHART_NAME}"
+                sh "rm -rf ${env.CHART_NAME}/templates/*.yaml"
+                sh "sed -i 's+0.1.0+${env.CHART_VERSION}+g' ${env.CHART_NAME}/Chart.yaml"
+                sh "cat ${env.CHART_NAME}/Chart.yaml"
+                sh "cp /home/cicd/workspace/kerimaksak-argocd-helm-latest/k8s/*.yml ${env.CHART_NAME}/templates/"
+
+                }
+            } 
+
+        }
+
+        stage("Helm Package and Push Harbor Repo"){
+            steps{
+              
+                dir('/home/cicd/safirdepo-helmcharts') {
+                sh "helm package ${env.CHART_NAME}"
+                sh 'helm push *.tgz oci://safir-harbor.b3lab.org/safirchart'
+                sh "rm -rf *"
+                }
+
+                
+        
+            }
+    }
+    }
+}
